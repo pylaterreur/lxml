@@ -151,19 +151,20 @@ cdef class Schematron(_Validator):
         cdef schematron.xmlSchematronValidCtxt* valid_ctxt
         cdef _ErrorLog error_log
         cdef int ret
+        cdef bint write_locked
 
         assert self._c_schema is not NULL, "Schematron instance not initialised"
         doc = _documentOrRaise(etree)
         root_node = _rootNodeOrRaise(etree)
 
-        doc.lock_fakedoc()
+        write_locked = doc.lock_fakedoc(root_node._c_node)
         # libxml2 caches function lookups in the compiled tests while evaluating them.
         run = _Run.start(self._run_lock, None)
         valid_ctxt = schematron.xmlSchematronNewValidCtxt(
             self._c_schema, schematron.XML_SCHEMATRON_OUT_ERROR)
         if valid_ctxt is NULL:
             run.release()
-            doc.unlock_fakedoc()
+            doc.unlock_fakedoc(write_locked)
             raise MemoryError()
 
         try:
@@ -179,7 +180,7 @@ cdef class Schematron(_Validator):
         finally:
             schematron.xmlSchematronFreeValidCtxt(valid_ctxt)
             run.release_if_held()
-            doc.unlock_fakedoc()
+            doc.unlock_fakedoc(write_locked)
             if error_log is not None:
                 error_log._run = None
 
