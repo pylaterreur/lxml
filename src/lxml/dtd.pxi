@@ -384,7 +384,8 @@ cdef class DTD(_Validator):
         valid_ctxt.error = <dtdvalid.xmlValidityErrorFunc>_nullGenericErrorFunc
         valid_ctxt.userData = NULL
 
-        doc.lock_fakedoc()
+        # xmlValidateDtd() modifies the document (its DTD pointers and ID/IDREF tables).
+        doc.lock_write()
         try:
             error_log.connect()
             try:
@@ -394,7 +395,7 @@ cdef class DTD(_Validator):
             finally:
                 error_log.disconnect()
         finally:
-            doc.unlock_fakedoc()
+            doc.unlock_write()
             dtdvalid.xmlFreeValidCtxt(valid_ctxt)
 
         self._set_validation_log(error_log, ret == 1)
