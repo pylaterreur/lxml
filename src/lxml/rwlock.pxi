@@ -204,7 +204,11 @@ cdef extern from * nogil:
 #if defined(__GNUC__) || defined(__clang__)
     #define __lxml_load_relaxed(ptr)  __atomic_load_n((ptr), __ATOMIC_RELAXED)
     #define __lxml_store_relaxed(ptr, value)  __atomic_store_n((ptr), (value), __ATOMIC_RELAXED)
+#elif defined(Py_ATOMIC_H)
+    #define __lxml_load_relaxed(ptr)  _Py_atomic_load_uintptr_relaxed(ptr)
+    #define __lxml_store_relaxed(ptr, value)  _Py_atomic_store_uintptr_relaxed((ptr), (value))
 #else
+    /* Without free-threading, the GIL serialises the accesses. */
     #define __lxml_load_relaxed(ptr)  (*(volatile uintptr_t *) (ptr))
     #define __lxml_store_relaxed(ptr, value)  (*(volatile uintptr_t *) (ptr) = (value))
 #endif
@@ -746,7 +750,7 @@ cdef class RWLock:
         return 0
 
     cdef void unlock_write(self) noexcept:
-        assert self._owns_write_lock(self._my_lock_id()), f"{self._write_locked_id} != {self._my_lock_id()}"
+        assert self._owns_write_lock(self._my_lock_id()), f"{load_relaxed(&self._write_locked_id)} != {self._my_lock_id()}"
         assert atomic_load(&self._reader_count) < 0, atomic_load(&self._reader_count)
 
         if self._writer_reentry > 0:
