@@ -37,6 +37,14 @@ Bugs fixed
   element kept references to the removed text nodes.
   Patch by Pierre-Yves Le Borgne.
 
+* XSLT transformations without extension functions or regular expression functions
+  (``regexp=False``) held only the read lock of their input document while libxslt modified
+  it: it removes the whitespace that ``xsl:strip-space`` strips, unlinks the DOCTYPE from the
+  children of the document, and stores document order indices and the ids of ``generate-id()``
+  in its nodes.  Other threads could see the changes in progress or crash.  Transformations now
+  always take the write lock of their input document.
+  Patch by Pierre-Yves Le Borgne.
+
 * LP#2164984: Returning non-element types from a parser target in ``XMLDTDID()`` could crash.
 
 * LP#1222132: Validators that were used in several threads at the same time mixed up the errors

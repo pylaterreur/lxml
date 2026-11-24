@@ -602,18 +602,15 @@ cdef class XSLT:
         input_doc = _documentOrRaise(_input)
         root_node = _rootNodeOrRaise(_input)
 
-        cdef bint use_write_lock = self._context._extensions
-        if use_write_lock:
-            input_doc.lock_write()
-        else:
-            input_doc.lock_fakedoc()
+        # libxslt modifies the input document: it removes the whitespace that xsl:strip-space
+        # strips, unlinks the DOCTYPE from the children of the document, numbers the elements
+        # for XPath and keeps the ids of generate-id() and the key flags in the nodes.  Extension
+        # functions may also modify the documents that share the lock of the input document.
+        input_doc.lock_write()
         try:
             c_doc = _fakeRootDoc(input_doc._c_doc, root_node._c_node)
         except:
-            if use_write_lock:
-                input_doc.unlock_write()
-            else:
-                input_doc.unlock_fakedoc()
+            input_doc.unlock_write()
             raise
 
         # From here on, libxslt uses the compiled stylesheet.  Profiled runs also use global
@@ -623,10 +620,7 @@ cdef class XSLT:
         if transform_ctxt is NULL:
             run.release()
             _destroyFakeDoc(input_doc._c_doc, c_doc)
-            if use_write_lock:
-                input_doc.unlock_write()
-            else:
-                input_doc.unlock_fakedoc()
+            input_doc.unlock_write()
             raise MemoryError()
 
         # libxslt gives each transformation a dict of its own that falls back to the stylesheet
@@ -636,10 +630,7 @@ cdef class XSLT:
             xslt.xsltFreeTransformContext(transform_ctxt)
             run.release()
             _destroyFakeDoc(input_doc._c_doc, c_doc)
-            if use_write_lock:
-                input_doc.unlock_write()
-            else:
-                input_doc.unlock_fakedoc()
+            input_doc.unlock_write()
             raise MemoryError()
 
         xslt.xsltSetCtxtParseOptions(
@@ -687,10 +678,7 @@ cdef class XSLT:
             if error_log is not None:
                 error_log._run = None
             _destroyFakeDoc(input_doc._c_doc, c_doc)
-            if use_write_lock:
-                input_doc.unlock_write()
-            else:
-                input_doc.unlock_fakedoc()
+            input_doc.unlock_write()
 
         self._publish_error_log(error_log, c_result is not NULL)
         try:

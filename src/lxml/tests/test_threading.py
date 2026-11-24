@@ -506,6 +506,71 @@ class ThreadingTestCase(HelperTestCase):
 
         self._run_threads(4, transform, main_func=add_names)
 
+    def test_thread_xslt_strip_space(self):
+        # xsl:strip-space removes whitespace from the input documents while other threads
+        # read them.  (Without extensions or regexp functions, XSLT only needs to read.)
+        XML = self.etree.XML
+        tostring = self.etree.tostring
+        style = self.etree.XSLT(XML(b'''\
+    <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+      <xsl:strip-space elements="*"/>
+      <xsl:template match="/"><out><xsl:value-of select="count(//text())"/></out></xsl:template>
+    </xsl:stylesheet>'''), regexp=False)
+        source = '<r>' + '<a> <b>x</b> </a>' * 20 + '</r>'
+        docs = [XML(source) for _ in range(20)]
+        texts = {' x ' * 20, 'x' * 20}  # before and after stripping
+        done = threading.Event()
+
+        def read():
+            while not done.is_set():
+                for doc in docs:
+                    self.assertIn(tostring(doc, method='text', encoding='unicode'), texts)
+
+        def transform():
+            try:
+                for doc in docs:
+                    self.assertEqual('20', style(doc).getroot().text)
+            finally:
+                done.set()
+
+        self._run_threads(4, read, main_func=transform)
+        for doc in docs:
+            self.assertEqual('x' * 20, tostring(doc, method='text', encoding='unicode'))
+
+    def test_thread_xslt_doctype(self):
+        # libxslt unlinks the DOCTYPE from the children of the input documents while other
+        # threads serialise them.  (Without extensions or regexp functions, XSLT only needs
+        # to read.)
+        XML = self.etree.XML
+        tostring = self.etree.tostring
+        style = self.etree.XSLT(XML(b'''\
+    <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+      <xsl:template match="/"><out/></xsl:template>
+    </xsl:stylesheet>'''), regexp=False)
+
+        def make_doc():
+            return self.etree.ElementTree(XML('<?pi x?><!DOCTYPE r [<!ELEMENT r ANY>]><r/>'))
+
+        transformed = make_doc()
+        style(transformed)
+        serialised = {tostring(make_doc()), tostring(transformed)}
+        docs = [make_doc() for _ in range(20)]
+        done = threading.Event()
+
+        def read():
+            while not done.is_set():
+                for doc in docs:
+                    self.assertIn(tostring(doc), serialised)
+
+        def transform():
+            try:
+                for doc in docs:
+                    self.assertEqual('out', style(doc).getroot().tag)
+            finally:
+                done.set()
+
+        self._run_threads(4, read, main_func=transform)
+
     def test_thread_create_xslt(self):
         XML = self.etree.XML
         tostring = self.etree.tostring
