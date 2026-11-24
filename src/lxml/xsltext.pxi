@@ -62,6 +62,14 @@ cdef class XSLTExtension:
             c_parent = tree.xmlNewDocNode(
                 context._xsltCtxt.output, NULL, <unsigned char*>"fake-parent", NULL)
 
+        # libxslt may change the input document (see XSLT.__call__()), and the document lock
+        # comes before the run lock.
+        try:
+            restored = context._lock_doc_for_libxslt()
+        except BaseException:
+            if output_parent is None:
+                tree.xmlFreeNode(c_parent)
+            raise
         c_node = context._xsltCtxt.insert
         context._xsltCtxt.insert = c_parent
         acquired = context._acquire_run_lock()
@@ -70,6 +78,8 @@ cdef class XSLTExtension:
         if acquired:
             context._run.release()
         context._xsltCtxt.insert = c_node
+        if restored:
+            context._downgrade_doc_lock()
 
         if output_parent is not None:
             return None
@@ -118,6 +128,14 @@ cdef class XSLTExtension:
             c_parent = tree.xmlNewDocNode(
                 context._xsltCtxt.output, NULL, <unsigned char*>"fake-parent", NULL)
 
+        # libxslt may change the input document (see XSLT.__call__()), and the document lock
+        # comes before the run lock.
+        try:
+            restored = context._lock_doc_for_libxslt()
+        except BaseException:
+            if output_parent is None:
+                tree.xmlFreeNode(c_parent)
+            raise
         c_ctxt.insert = c_parent
         acquired = context._acquire_run_lock()
         xslt.xsltApplyOneTemplate(c_ctxt,
@@ -125,6 +143,8 @@ cdef class XSLTExtension:
         if acquired:
             context._run.release()
         c_ctxt.insert = c_old_output_parent
+        if restored:
+            context._downgrade_doc_lock()
 
         if output_parent is not None:
             return None
@@ -227,9 +247,13 @@ cdef void _callExtensionElement(xslt.xsltTransformContext* c_ctxt,
                 # run the XSLT extension
                 context._extension_element_proxy = self_node
                 released = context._release_run_lock()
+                downgraded = context._downgrade_doc_lock()
                 try:
                     extension.execute(context, self_node, context_node, output_parent)
                 finally:
+                    # (The document lock comes before the run lock.)
+                    if downgraded:
+                        context._restore_doc_lock()
                     if released:
                         context._run.acquire()
             finally:
