@@ -1070,6 +1070,21 @@ class ETreeOnlyTestCase(HelperTestCase):
                 elem.clear()
         self.assertFalse(found)
 
+    def test_iterparse_entity_comment_pi(self):
+        element_names = []
+
+        class Lookup(etree.CustomElementClassLookup):
+            def lookup(self, node_type, document, namespace, name):
+                if node_type == 'element':
+                    element_names.append(name)
+
+        xml = b'<!DOCTYPE r [ <!ENTITY e "<!--c--><?p d?>"> ]><r>&e;</r>'
+        events = etree.iterparse(BytesIO(xml), events=("comment", "pi"))
+        events.set_element_class_lookup(Lookup())
+        self.assertEqual(["c", "d"], [node.text for _event, node in events])
+        # libxml2 < 2.13 replaces the root element by a temporary one while parsing the entity.
+        self.assertEqual({"r"}, set(element_names))
+
     def test_parser_encoding_unknown(self):
         self.assertRaises(
             LookupError, self.etree.XMLParser, encoding="hopefully unknown")

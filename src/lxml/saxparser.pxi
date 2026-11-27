@@ -11,6 +11,21 @@ class XMLSyntaxAssertionError(XMLSyntaxError, AssertionError):
         XMLSyntaxError.__init__(self, message, None, 0, 1)
 
 
+cdef extern from *:
+    """
+    /* libxml2 < 2.13 parses the content of entities in a separate parser context
+       that shares the SAX handler and '_private' of the original one,
+       and counts the nesting depth of the entities in the original one meanwhile.
+       The HTML parser uses 'depth' to count the misplaced tags that it ignores. */
+    #if LIBXML_VERSION < 21300
+      #define __lxml_isParsingEntityInSeparateContext(c_ctxt)  (!(c_ctxt)->html && (c_ctxt)->depth > 0)
+    #else
+      #define __lxml_isParsingEntityInSeparateContext(c_ctxt)  (0)
+    #endif
+    """
+    bint _isParsingEntityInSeparateContext "__lxml_isParsingEntityInSeparateContext" (xmlparser.xmlParserCtxt* c_ctxt)
+
+
 ctypedef enum _SaxParserEvents:
     SAX_EVENT_START    = 1 << 0
     SAX_EVENT_END      = 1 << 1
@@ -225,7 +240,8 @@ cdef class _SaxParserContext(_ParserContext):
     @cython.inline
     cdef bint _isRetainingEvents(self):
         cdef xmlparser.xmlParserCtxt* c_ctxt = self._c_ctxt
-        if c_ctxt.inputNr > 1 and c_ctxt.options & xmlparser.XML_PARSE_NOENT:
+        if (c_ctxt.inputNr > 1 and c_ctxt.options & xmlparser.XML_PARSE_NOENT
+                or _isParsingEntityInSeparateContext(c_ctxt)):
             # libxml2 has started parsing a parsed (external) entity. Collect events until it's finished.
             if self._pending_events is None:
                 self._pending_events = []
@@ -251,7 +267,8 @@ cdef class _SaxParserContext(_ParserContext):
     @cython.final
     cdef int pushNodeEvent(self, event_name, xmlNode* c_node) except -1:
         cdef _Element root
-        if self._root is None:
+        # libxml2 < 2.13 replaces the root element by a temporary node while parsing an entity.
+        if self._root is None and not self._isRetainingEvents():
             root = self._doc.getroot()
             if root is not None and root._c_node.type == tree.XML_ELEMENT_NODE:
                 self._root = root
@@ -284,17 +301,21 @@ cdef class _SaxParserContext(_ParserContext):
 
     @cython.final
     cdef int pushEndEventFromStack(self) except -1:
-        node = self._end_node_stack.pop()
         if self._isRetainingEvents():
+            node = self._end_node_stack.pop()
             self._pending_events.append(
                 (<_PendingNodeEvent> node).for_event('end') if type(node) is _PendingNodeEvent else ('end', node))
             return 0
+        if self._pending_events is not None:
+            self._flushPendingEvents()
+            if not self._end_node_stack:
+                # Only unclosed elements of a discarded entity were left.
+                return 0
+        node = self._end_node_stack.pop()
         if type(node) is _PendingNodeEvent:
             # Resolve only the node because we store _PendingNodeEvent('start') in self._end_node_stack
             # to avoid the double allocation.
             node = (<_PendingNodeEvent> node).resolve_node(self._doc)
-        if self._pending_events:
-            self._flushPendingEvents()
         self.events_iterator.add_event( ('end', node) )
         return 0
 
@@ -309,6 +330,12 @@ cdef class _SaxParserContext(_ParserContext):
 
     @cython.final
     cdef int _flushPendingEvents(self) except -1:
+        if tree.LIBXML_VERSION < 21300 and not self._c_ctxt.wellFormed:
+            # libxml2 < 2.13 frees entities that fail to parse, also when recovering from errors.
+            self._pending_events = None
+            # Also forget their unclosed elements.
+            self._end_node_stack = [node for node in self._end_node_stack if type(node) is not _PendingNodeEvent]
+            return 0
         events_queue = self.events_iterator._events
         # The pending events queue shouldn't change while processing it,
         # but it shouldn't hurt to allow it to extend.

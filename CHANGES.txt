@@ -62,6 +62,12 @@ Bugs fixed
 * Tag and attribute names passed into ``xmlfile.element()`` and ``htmlfile.element()``
   were not validated and could inject arbitrary markup into the output.
 
+* GHSA-59qx-3jjv-x996: The fix in lxml 6.2.0 did not work with libxml2 < 2.13, which parses entities
+  in a separate parser context.  ``iterparse()`` and ``XMLPullParser`` could still crash with it
+  on entities that fail to parse, but also on comments and PIs in entities and on entities
+  that are referenced more than once.
+  Patch by Pierre-Yves Le Borgne.
+
 Other changes
 -------------
 

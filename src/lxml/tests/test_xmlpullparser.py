@@ -396,6 +396,16 @@ class EtreeEntityResolutionTest(unittest.TestCase):
                                             chunk_size=chunk_size, xml=xml):
                                 self.assertEqual(feed_in_chunks(xml, chunk_size, parser_class, event_types), expected)
 
+    def test_entity_referenced_twice(self):
+        parser = self.etree.XMLPullParser(events=("start",))
+        parser.feed("<!DOCTYPE r [ <!ENTITY e '<a/>'> ]><r>&e;&e;</r>")
+        parser.close()
+        # Keep the elements of the events alive.
+        events = list(parser.read_events())
+        root = events[0][1]
+        self.assertEqual(2, len(root))
+        self.assertIsNot(root[0], root[1])
+
 
 class ElementTreeEntityResolutionTest(EtreeEntityResolutionTest):
     etree = ElementTree
@@ -451,6 +461,27 @@ class EtreeEntityParseFailureTest(unittest.TestCase):
             ('comment', 'Ocomment2'),
         ]
         self.assertEqual(events, expected)
+
+    def test_entity_parse_failure_unread_events(self):
+        parser = self.etree.XMLPullParser(events=("start", "end"))
+        with self.assertRaises(self.etree.XMLSyntaxError):
+            parser.feed("<!DOCTYPE r [ <!ENTITY e \"<item><name>zz</name></item><x>\"> ]><r>&e;</r>")
+        # Only look at the event names since the elements of the failed entity no longer exist.
+        self.assertEqual(["start"], [event for event, _ in parser.read_events()])
+
+    @unittest.skipIf(etree.LIBXML_VERSION >= (2, 13), "libxml2 2.13+ keeps failed entities when recovering")
+    def test_entity_parse_failure_recover(self):
+        for event_types, entity in [(("start", "end"), "<item><name>zz</name></item><x>"), (("end",), "<x>")]:
+            with self.subTest(event_types=event_types, entity=entity):
+                parser = self.etree.XMLPullParser(events=event_types, recover=True)
+                parser.feed(f"<!DOCTYPE r [ <!ENTITY e \"{entity}\"> ]><r>&e;<y/></r>")
+                root = parser.close()
+                events = list(parser.read_events())
+                expected = [(event, element) for event, element in [
+                    ("start", root), ("start", root[0]), ("end", root[0]), ("end", root)] if event in event_types]
+                # Compare the event names first since the elements of the failed entity no longer exist.
+                self.assertEqual([event for event, _ in expected], [event for event, _ in events])
+                self.assertEqual(expected, events)
 
 
 def test_suite():
