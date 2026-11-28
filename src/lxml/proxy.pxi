@@ -87,20 +87,23 @@ cdef inline int _unregisterProxy(_Element proxy) except -1:
 cdef xmlDoc* _fakeRootDoc(xmlDoc* c_base_doc, xmlNode* c_node) except NULL:
     return _plainFakeRootDoc(c_base_doc, c_node, 1)
 
+cdef bint _needsFakeRootDoc(xmlDoc* c_base_doc, xmlNode* c_node, bint with_siblings) noexcept:
+    # No temporary document is needed for the root element, unless it has unwanted siblings.
+    if with_siblings or (c_node.prev is NULL and c_node.next is NULL):
+        return tree.xmlDocGetRootElement(c_base_doc) is not c_node
+    return True
+
 cdef xmlDoc* _plainFakeRootDoc(xmlDoc* c_base_doc, xmlNode* c_node,
                                bint with_siblings) except NULL:
     # build a temporary document that has the given node as root node
     # note that copy and original must not be modified during its lifetime!!
     # always call _destroyFakeDoc() after use!
     cdef xmlNode* c_child
-    cdef xmlNode* c_root
     cdef xmlNode* c_new_root
     cdef xmlDoc*  c_doc
-    if with_siblings or (c_node.prev is NULL and c_node.next is NULL):
-        c_root = tree.xmlDocGetRootElement(c_base_doc)
-        if c_root is c_node:
-            # already the root node, no siblings
-            return c_base_doc
+    if not _needsFakeRootDoc(c_base_doc, c_node, with_siblings):
+        # already the root node, no siblings
+        return c_base_doc
 
     c_doc  = _copyDoc(c_base_doc, 0)                   # non recursive!
     c_new_root = tree.xmlDocCopyNode(c_node, c_doc, 2) if c_doc is not NULL else NULL # non recursive!
@@ -142,6 +145,51 @@ cdef void _destroyFakeDoc(xmlDoc* c_base_doc, xmlDoc* c_doc) noexcept:
         c_child = c_child.next
 
     # prevent recursive removal of children
+    c_root.children = c_root.last = NULL
+    tree.xmlFreeDoc(c_doc)
+
+cdef xmlDoc* _readOnlyFakeRootDoc(xmlDoc* c_base_doc, xmlNode* c_node,
+                                  bint with_siblings) except NULL:
+    """Build a temporary document whose root element is a shallow copy of 'c_node' that
+    shares its children, like _plainFakeRootDoc(), but without changing the tree: the
+    children keep their parent pointers.  The read lock of the document is enough.
+
+    Only code that walks down from the document node is safe on it, and code that walks
+    up through the parent pointers must only use them to look up namespaces and inherited
+    attributes, as libxml2's C14N does.  Code that leaves an element through its parent
+    pointer (XPath, validators, xmlsave, deep copies) would walk out of the document.
+
+    The temporary document has no names dictionary, so that building it does not touch
+    the dictionary of the original document, which other threads may change meanwhile.
+    Always call _destroyReadOnlyFakeDoc() after use!
+    """
+    cdef xmlNode* c_new_root
+    cdef xmlDoc* c_doc
+    if not _needsFakeRootDoc(c_base_doc, c_node, with_siblings):
+        # already the root node, no siblings
+        return c_base_doc
+
+    c_doc = tree.xmlCopyDoc(c_base_doc, 0)  # non recursive, no dictionary
+    if c_doc is NULL:
+        raise MemoryError()
+    c_new_root = tree.xmlDocCopyNode(c_node, c_doc, 2)  # non recursive
+    if c_new_root is NULL:
+        tree.xmlFreeDoc(c_doc)
+        raise MemoryError()
+    tree.xmlDocSetRootElement(c_doc, c_new_root)
+    _copyParentNamespaces(c_node, c_new_root)
+    c_new_root.children = c_node.children
+    c_new_root.last = c_node.last
+    c_doc._private = c_node
+    return c_doc
+
+cdef void _destroyReadOnlyFakeDoc(xmlDoc* c_base_doc, xmlDoc* c_doc) noexcept:
+    # delete a temporary document of _readOnlyFakeRootDoc()
+    cdef xmlNode* c_root
+    if c_doc is c_base_doc:
+        return
+    c_root = tree.xmlDocGetRootElement(c_doc)
+    # prevent recursive removal of the shared children
     c_root.children = c_root.last = NULL
     tree.xmlFreeDoc(c_doc)
 

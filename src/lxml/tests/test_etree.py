@@ -5718,6 +5718,50 @@ class ETreeC14NTestCase(HelperTestCase):
         self.assertEqual(b'<z:b xmlns:y="http://bcd" xmlns:z="http://cde"></z:b>',
                           s)
 
+    def test_c14n_subelement_keeps_tree_unchanged(self):
+        # Serialising a sub-element must not change the tree while it runs, which
+        # also other threads could see.  Here, the write() method of the file sees it.
+        root = etree.XML(b'<root xmlns:x="urn:x"><a><b/><x:c/><b>t</b></a><d/></root>')
+        a = root[0]
+        children = list(a)
+        seen = []
+
+        class Writer:
+            def write(self, data):
+                seen.append(([child.getparent() is a for child in children],
+                             a.getparent() is root, [el.tag for el in root]))
+
+        expected = ([True] * len(children), True, ['a', 'd'])
+        for kwargs in ({}, {'exclusive': True}, {'with_comments': True}):
+            del seen[:]
+            etree.ElementTree(a).write(Writer(), method='c14n', **kwargs)
+            self.assertTrue(seen)
+            self.assertEqual([expected] * len(seen), seen)
+
+        self.assertEqual(
+            b'<a xmlns:x="urn:x"><b></b><x:c></x:c><b>t</b></a>',
+            etree.tostring(a, method='c14n'))
+        self.assertEqual(
+            b'<a><b></b><x:c xmlns:x="urn:x"></x:c><b>t</b></a>',
+            etree.tostring(a, method='c14n', exclusive=True))
+
+    def test_c14n_subelement_namespaces(self):
+        # Descendants of the serialised element use the namespace declarations of their
+        # ancestors, not copies of them, as before (no xmlns="" or repeated declarations).
+        for xml, expected in [
+                ('<r><s xmlns="urn:x"><a><b/></a></s></r>',
+                 b'<s xmlns="urn:x"><a><b></b></a></s>'),
+                ('<r xmlns="urn:x"><s><a><b>t</b></a></s></r>',
+                 b'<s xmlns="urn:x"><a><b>t</b></a></s>'),
+                ('<r xmlns:c="urn:y"><s><c:x><e><z xmlns:c="urn:y"/></e></c:x></s></r>',
+                 b'<s xmlns:c="urn:y"><c:x><e><z></z></e></c:x></s>'),
+                ]:
+            sub = etree.XML(xml)[0]
+            self.assertEqual(expected, etree.tostring(sub, method='c14n'))
+            f = BytesIO()
+            etree.ElementTree(sub).write(f, method='c14n')
+            self.assertEqual(expected, f.getvalue())
+
     def test_c14n_tostring_inclusive_ns_prefixes(self):
         """ Regression test to fix memory allocation issues (use 3+ inclusive NS spaces)"""
         tree = self.parse(_bytes(

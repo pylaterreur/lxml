@@ -172,11 +172,12 @@ cdef bytes _tostringC14N(element_or_tree, bint exclusive, bint with_comments, in
         element = <_Element> element_or_tree
         _assertValidNode(element)
         doc = element._doc
-        doc.lock_fakedoc()
+        # C14N does not need to change the tree for a sub-element.
+        doc.lock_read()
         try:
-            c_doc = _plainFakeRootDoc(doc._c_doc, element._c_node, 0)
+            c_doc = _readOnlyFakeRootDoc(doc._c_doc, element._c_node, 0)
         except:
-            doc.unlock_fakedoc()
+            doc.unlock_read()
             raise
     else:
         doc = _documentOrRaise(element_or_tree)
@@ -186,17 +187,15 @@ cdef bytes _tostringC14N(element_or_tree, bint exclusive, bint with_comments, in
         c_doc = doc._c_doc
 
     try:
-        c_inclusive_ns_prefixes = _convert_ns_prefixes(c_doc.dict, inclusive_ns_prefixes) if inclusive_ns_prefixes else NULL
+        c_inclusive_ns_prefixes = _convert_ns_prefixes(doc._c_doc.dict, inclusive_ns_prefixes) if inclusive_ns_prefixes else NULL
         with nogil:
             byte_count = c14n.xmlC14NDocDumpMemory(
                 c_doc, NULL, exclusive, c_inclusive_ns_prefixes, with_comments, &c_buffer)
 
     finally:
-        if element is None:
-            doc.unlock_read()
-        else:
-            _destroyFakeDoc(doc._c_doc, c_doc)
-            doc.unlock_fakedoc()
+        if element is not None:
+            _destroyReadOnlyFakeDoc(doc._c_doc, c_doc)
+        doc.unlock_read()
 
         if c_inclusive_ns_prefixes is not NULL:
            python.lxml_free(c_inclusive_ns_prefixes)
@@ -863,13 +862,14 @@ cdef _tofilelikeC14N(f, _Element element, bint exclusive, bint with_comments,
     cdef int bytes_count, error = 0
 
     doc = element._doc
-    doc.lock_fakedoc()
+    # C14N does not need to change the tree for a sub-element.
+    doc.lock_read()
     try:
         c_base_doc = element._c_node.doc
-        c_doc = _fakeRootDoc(c_base_doc, element._c_node)
+        c_doc = _readOnlyFakeRootDoc(c_base_doc, element._c_node, 1)
 
         c_inclusive_ns_prefixes = (
-            _convert_ns_prefixes(c_doc.dict, inclusive_ns_prefixes)
+            _convert_ns_prefixes(c_base_doc.dict, inclusive_ns_prefixes)
             if inclusive_ns_prefixes else NULL)
 
         f = _getFSPathOrObject(f)
@@ -905,8 +905,8 @@ cdef _tofilelikeC14N(f, _Element element, bint exclusive, bint with_comments,
             raise TypeError(f"File or filename expected, got '{python._fqtypename(f)}'")
     finally:
         if c_doc is not NULL:
-            _destroyFakeDoc(c_base_doc, c_doc)
-        doc.unlock_fakedoc()
+            _destroyReadOnlyFakeDoc(c_base_doc, c_doc)
+        doc.unlock_read()
         if c_inclusive_ns_prefixes is not NULL:
             python.lxml_free(c_inclusive_ns_prefixes)
 

@@ -62,6 +62,13 @@ Bugs fixed
 * Tag and attribute names passed into ``xmlfile.element()`` and ``htmlfile.element()``
   were not validated and could inject arbitrary markup into the output.
 
+* Inclusive C14N serialisation of an element other than the root element could add
+  ``xmlns=""`` to descendants in an inherited default namespace, which moved them out of
+  their namespace, and redundant namespace declarations to others.  It also changed the
+  parent pointers of the element's children while it ran, which other threads (and Python
+  code that ran meanwhile, such as the ``write()`` method of a target file) could see.
+  It now leaves the tree unchanged and only takes the read lock of the document.
+
 Other changes
 -------------
 
