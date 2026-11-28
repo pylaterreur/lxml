@@ -240,6 +240,24 @@ class ETreeXPathTestCase(HelperTestCase):
         self.assertEqual([d2],
                          tree.xpath(tree.getpath(d2)))
 
+    def test_elementtree_getpath_partial_root(self):
+        root = etree.XML(
+            '<a xmlns:p="urn:p"><c/><c><d/><d/></c><p:c><d/></p:c>'
+            '<n xmlns="urn:n"><n/></n></a>')
+        for subtree_root, paths in [
+                (root[1], ['/c', '/c/d[1]', '/c/d[2]']),
+                (root[2], ['/p:c', '/p:c/d']),
+                (root[3], ['/*', '/*/*']),
+                ]:
+            tree = etree.ElementTree(subtree_root)
+            elements = list(subtree_root.iter())
+            self.assertEqual(paths, [tree.getpath(el) for el in elements])
+            self.assertEqual(
+                [[el] for el in elements],
+                [tree.xpath(path, namespaces={'p': 'urn:p'}) for path in paths])
+        # elements outside of the tree keep their path in the document
+        self.assertEqual('/a/c[1]', etree.ElementTree(root[1]).getpath(root[0]))
+
     def test_xpath_evaluator(self):
         tree = self.parse('<a><b><c></c></b></a>')
         e = etree.XPathEvaluator(tree)

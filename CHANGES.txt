@@ -69,6 +69,11 @@ Bugs fixed
   code that ran meanwhile, such as the ``write()`` method of a target file) could see.
   It now leaves the tree unchanged and only takes the read lock of the document.
 
+* ``ElementTree.getpath()`` returned the path in the whole document for the root of a
+  tree whose root is not the root element of its document, e.g. ``/a/c[2]`` instead of
+  ``/c`` for ``ElementTree(c)``.  It also no longer changes the tree to find the path and
+  only takes the read lock of the document.
+
 Other changes
 -------------
 

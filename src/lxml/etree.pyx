@@ -2738,7 +2738,6 @@ cdef public class _ElementTree [ type LxmlElementTreeType,
         """
         cdef _Document doc
         cdef _Element root
-        cdef xmlDoc* c_doc
         _assertValidNode(element)
         if self._context_node is not None:
             root = self._context_node
@@ -2753,21 +2752,11 @@ cdef public class _ElementTree [ type LxmlElementTreeType,
         if element._doc is not doc:
             raise ValueError, "Element is not in this tree."
 
-        doc.lock_fakedoc()
+        doc.lock_read()
         try:
-            c_doc = _fakeRootDoc(doc._c_doc, root._c_node)
-            c_path = tree.xmlGetNodePath(element._c_node)
-            _destroyFakeDoc(doc._c_doc, c_doc)
+            return _treeNodePath(root._c_node, element._c_node)
         finally:
-            doc.unlock_fakedoc()
-
-        if c_path is NULL:
-            raise MemoryError()
-        try:
-            path = funicode(c_path)
-        finally:
-            tree.xmlFree(c_path)
-        return path
+            doc.unlock_read()
 
     def getelementpath(self, _Element element not None):
         """getelementpath(self, element)
@@ -3106,6 +3095,44 @@ cdef public class _ElementTree [ type LxmlElementTreeType,
         _tofilelikeC14N(file, self._context_node, exclusive, with_comments,
                         compression, inclusive_ns_prefixes)
 
+
+cdef str _nodePath(xmlNode* c_node):
+    cdef xmlChar* c_path = tree.xmlGetNodePath(c_node)
+    if c_path is NULL:
+        raise MemoryError()
+    try:
+        return funicode(c_path)
+    finally:
+        tree.xmlFree(c_path)
+
+
+cdef str _treeNodePath(xmlNode* c_root, xmlNode* c_node):
+    """Return the XPath of 'c_node' in a tree whose root is 'c_root', i.e. the one that
+    xmlGetNodePath() returns while 'c_root' is the root element of its document, without
+    making it the root element (which would change the tree, see _plainFakeRootDoc()).
+    """
+    cdef xmlNode* c_parent = NULL
+    if (c_root.type == tree.XML_ELEMENT_NODE and
+            tree.xmlDocGetRootElement(c_root.doc) is not c_root):
+        c_parent = c_node
+        while c_parent is not NULL and c_parent is not c_root:
+            c_parent = c_parent.parent
+    path = _nodePath(c_node)
+    if c_parent is NULL:
+        # 'c_root' is the root element, or 'c_node' is outside of the tree
+        return path
+    return _subtreePath(_nodePath(c_root), path)
+
+
+cdef str _subtreePath(str root_path, str path):
+    """Turn the 'path' of a node below (or at) the element at 'root_path' into its path
+    in the tree whose root element is that element.
+    """
+    # As the root element, it has no index, and the path continues as in the document.
+    step = root_path[root_path.rfind('/') + 1:]
+    if step.endswith(']'):
+        step = step[:step.rfind('[')]
+    return '/' + step + path[len(root_path):]
 
 cdef _ElementTree _elementTreeFactory(_Document doc, _Element context_node):
     return _newElementTree(doc, context_node, _ElementTree)
