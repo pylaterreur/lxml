@@ -3134,6 +3134,30 @@ cdef str _subtreePath(str root_path, str path):
         step = step[:step.rfind('[')]
     return '/' + step + path[len(root_path):]
 
+
+cdef int _treeLogPaths(_ListErrorLog error_log, xmlNode* c_root) except -1:
+    """Change the paths in the entries of 'error_log', which were found below (or at) the
+    element 'c_root', to their paths in the tree whose root element is 'c_root', as they
+    were when the validation used it as the root of a temporary document.
+    """
+    cdef _LogEntry entry
+    cdef xmlChar* c_path
+    root_path = _nodePath(c_root)
+    with cython.critical_section(error_log._entries):
+        for entry in error_log._entries:
+            if entry._c_path is NULL:
+                continue
+            path = funicode(entry._c_path)
+            if path != root_path and not path.startswith(root_path + '/'):
+                continue
+            path_utf8 = _utf8(_subtreePath(root_path, path))
+            c_path = tree.xmlStrdup(_xcstr(path_utf8))
+            if c_path is NULL:
+                raise MemoryError()
+            tree.xmlFree(entry._c_path)
+            entry._c_path = c_path
+    return 0
+
 cdef _ElementTree _elementTreeFactory(_Document doc, _Element context_node):
     return _newElementTree(doc, context_node, _ElementTree)
 

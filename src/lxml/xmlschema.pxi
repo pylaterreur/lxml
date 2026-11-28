@@ -122,18 +122,24 @@ cdef class XMLSchema(_Validator):
         cdef xmlschema.xmlSchemaValidCtxt* valid_ctxt
         cdef _Document doc
         cdef _Element root_node
-        cdef xmlDoc* c_doc
+        cdef xmlNode* c_node
+        cdef bint is_root
         cdef int ret
 
         assert self._c_schema is not NULL, "Schema instance not initialised"
         doc = _documentOrRaise(etree)
         root_node = _rootNodeOrRaise(etree)
+        c_node = root_node._c_node
 
         valid_ctxt = xmlschema.xmlSchemaNewValidCtxt(self._c_schema)
         if valid_ctxt is NULL:
             raise MemoryError()
 
-        doc.lock_fakedoc()
+        # Adding default attributes changes the tree.
+        if self._add_attribute_defaults:
+            doc.lock_write()
+        else:
+            doc.lock_read()
         try:
             if self._add_attribute_defaults:
                 xmlschema.xmlSchemaSetValidOptions(
@@ -144,12 +150,20 @@ cdef class XMLSchema(_Validator):
             xmlschema.xmlSchemaSetValidStructuredErrors(
                 valid_ctxt, <xmlerror.xmlStructuredErrorFunc> _receiveError, <void*>self._error_log)
 
-            c_doc = _fakeRootDoc(doc._c_doc, root_node._c_node)
+            # A sub-element is validated in its place, as the root of the validation.
+            is_root = tree.xmlDocGetRootElement(doc._c_doc) is c_node
             with nogil:
-                ret = xmlschema.xmlSchemaValidateDoc(valid_ctxt, c_doc)
-            _destroyFakeDoc(doc._c_doc, c_doc)
+                if is_root:
+                    ret = xmlschema.xmlSchemaValidateDoc(valid_ctxt, doc._c_doc)
+                else:
+                    ret = xmlschema.xmlSchemaValidateOneElement(valid_ctxt, c_node)
+            if not is_root:
+                _treeLogPaths(self._error_log, c_node)
         finally:
-            doc.unlock_fakedoc()
+            if self._add_attribute_defaults:
+                doc.unlock_write()
+            else:
+                doc.unlock_read()
             xmlschema.xmlSchemaFreeValidCtxt(valid_ctxt)
 
         if ret == -1:

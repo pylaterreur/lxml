@@ -119,6 +119,67 @@ class ETreeXMLSchemaTestCase(HelperTestCase):
         self.assertEqual('ho', root[2].get('hardy'))
         self.assertEqual('hey', root[3].get('hardy'))
 
+    def test_xmlschema_default_attributes_subelement(self):
+        schema = etree.XMLSchema(self.parse('''
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <xsd:element name="s">
+    <xsd:complexType>
+      <xsd:sequence>
+        <xsd:element name="e">
+          <xsd:complexType><xsd:attribute name="a" default="inner"/></xsd:complexType>
+        </xsd:element>
+      </xsd:sequence>
+      <xsd:attribute name="a" default="outer"/>
+    </xsd:complexType>
+  </xsd:element>
+</xsd:schema>
+'''), attribute_defaults=True)
+
+        root = etree.XML('<r><s><e/></s></r>')
+        self.assertTrue(schema.validate(root[0]))
+        self.assertEqual(b'<r><s a="outer"><e a="inner"/></s></r>', etree.tostring(root))
+
+    def test_xmlschema_default_attributes_subelement_ancestor_namespace(self):
+        schema = etree.XMLSchema(self.parse('''
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:t"
+            elementFormDefault="qualified" attributeFormDefault="qualified">
+  <xsd:element name="s">
+    <xsd:complexType>
+      <xsd:sequence>
+        <xsd:element name="e">
+          <xsd:complexType><xsd:attribute name="a" default="d"/></xsd:complexType>
+        </xsd:element>
+      </xsd:sequence>
+    </xsd:complexType>
+  </xsd:element>
+</xsd:schema>
+'''), attribute_defaults=True)
+
+        # The namespace of the default attribute is declared on an ancestor of the
+        # validated element, whose declaration the attribute must use.
+        root = etree.XML('<r xmlns:t="urn:t"><t:s><t:e/></t:s></r>')
+        self.assertTrue(schema.validate(root[0]))
+        self.assertEqual(b'<r xmlns:t="urn:t"><t:s><t:e t:a="d"/></t:s></r>',
+                         etree.tostring(root))
+        self.assertEqual('d', root[0][0].get('{urn:t}a'))
+
+    def test_xmlschema_error_log_path_subelement(self):
+        schema = etree.XMLSchema(self.parse('''
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <xsd:element name="a">
+    <xsd:complexType><xsd:sequence>
+      <xsd:element name="b" type="xsd:integer" maxOccurs="2"/>
+    </xsd:sequence></xsd:complexType>
+  </xsd:element>
+</xsd:schema>
+'''))
+        root = etree.XML('<r><a/><a><b>42</b><b>dada</b></a></r>')
+        self.assertFalse(schema.validate(root[1]))
+        # The path of the error is the path in the validated tree, as from getpath().
+        self.assertEqual(['/a/b[2]'], [entry.path for entry in schema.error_log])
+        tree = etree.ElementTree(root[1])
+        self.assertEqual('/a/b[2]', tree.getpath(root[1][1]))
+
     def test_xmlschema_parse(self):
         schema = self.parse('''
 <xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">

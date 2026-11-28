@@ -1,4 +1,4 @@
-from lxml.includes.tree cimport xmlDoc
+from lxml.includes.tree cimport xmlDoc, xmlNode
 from lxml.includes.xmlparser cimport xmlSAXHandler, xmlResourceLoader
 from lxml.includes.xmlerror cimport xmlStructuredErrorFunc
 
@@ -27,6 +27,7 @@ cdef extern from "libxml/xmlschemas.h" nogil:
         xmlStructuredErrorFunc serror, void *ctx)
 
     cdef int xmlSchemaValidateDoc(xmlSchemaValidCtxt* ctxt, xmlDoc* doc) nogil
+    cdef int xmlSchemaValidateOneElement(xmlSchemaValidCtxt* ctxt, xmlNode* elem) nogil
     cdef xmlSchema* xmlSchemaParse(xmlSchemaParserCtxt* ctxt) nogil
     cdef xmlSchemaParserCtxt* xmlSchemaNewParserCtxt(char* URL) nogil
     cdef xmlSchemaParserCtxt* xmlSchemaNewDocParserCtxt(xmlDoc* doc) nogil

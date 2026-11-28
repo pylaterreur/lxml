@@ -74,6 +74,13 @@ Bugs fixed
   ``/c`` for ``ElementTree(c)``.  It also no longer changes the tree to find the path and
   only takes the read lock of the document.
 
+* ``XMLSchema`` validation of an element other than the root element with
+  ``attribute_defaults=True`` lost the default attributes of the element itself, and
+  default attributes of its descendants in a namespace declared above the element
+  referred to a freed namespace declaration.  The element is now validated in its place
+  instead of as the root of a temporary document.  The paths in the error log stay
+  relative to the validated element.
+
 Other changes
 -------------
 
