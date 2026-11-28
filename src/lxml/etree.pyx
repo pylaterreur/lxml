@@ -560,13 +560,24 @@ cdef public class _Document [ type LxmlDocumentType, object LxmlDocument ]:
     cdef void unlock_write(self) noexcept:
         self._lock.unlock_write()
 
-    cdef void lock_fakedoc(self) noexcept:
-        # Explicit alias for locking when we create a 'fake root doc'.
+    cdef bint lock_fakedoc(self, xmlNode* c_node, bint with_siblings=True) noexcept:
+        # Lock the document for _plainFakeRootDoc(c_node, with_siblings), which changes
+        # the tree (and thus needs the write lock) unless 'c_node' is the root element.
+        # Returns true if it took the write lock.  _plainFakeRootDoc() checks again,
+        # under the lock, whether it needs to change the tree.
         self._lock.lock_read()
-
-    cdef void unlock_fakedoc(self) noexcept:
-        # Explicit alias for locking when we create a 'fake root doc'.
+        if not _needsFakeRootDoc(self._c_doc, c_node, with_siblings):
+            return False
         self._lock.unlock_read()
+        self._lock.lock_write()
+        return True
+
+    cdef void unlock_fakedoc(self, bint write_locked) noexcept:
+        # Unlock after lock_fakedoc().
+        if write_locked:
+            self._lock.unlock_write()
+        else:
+            self._lock.unlock_read()
 
     cdef void lock_write_with(self, _Document second_doc) noexcept:
         """Lock two documents for writing at the same time.
@@ -3157,6 +3168,7 @@ cdef int _treeLogPaths(_ListErrorLog error_log, xmlNode* c_root) except -1:
             tree.xmlFree(entry._c_path)
             entry._c_path = c_path
     return 0
+
 
 cdef _ElementTree _elementTreeFactory(_Document doc, _Element context_node):
     return _newElementTree(doc, context_node, _ElementTree)

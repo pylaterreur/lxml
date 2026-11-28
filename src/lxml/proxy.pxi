@@ -98,6 +98,8 @@ cdef xmlDoc* _plainFakeRootDoc(xmlDoc* c_base_doc, xmlNode* c_node,
     # build a temporary document that has the given node as root node
     # note that copy and original must not be modified during its lifetime!!
     # always call _destroyFakeDoc() after use!
+    # This changes the parent pointers of the children of 'c_node', which needs
+    # the write lock of the document, see _Document.lock_fakedoc().
     cdef xmlNode* c_child
     cdef xmlNode* c_new_root
     cdef xmlDoc*  c_doc

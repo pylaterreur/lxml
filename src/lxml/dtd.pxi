@@ -379,14 +379,14 @@ cdef class DTD(_Validator):
         valid_ctxt.error = <dtdvalid.xmlValidityErrorFunc>_nullGenericErrorFunc
         valid_ctxt.userData = NULL
 
-        doc.lock_fakedoc()
+        cdef bint write_locked = doc.lock_fakedoc(root_node._c_node)
         try:
             with self._error_log:
                 c_doc = _fakeRootDoc(doc._c_doc, root_node._c_node)
                 ret = dtdvalid.xmlValidateDtd(valid_ctxt, c_doc, self._c_dtd)
                 _destroyFakeDoc(doc._c_doc, c_doc)
         finally:
-            doc.unlock_fakedoc()
+            doc.unlock_fakedoc(write_locked)
             dtdvalid.xmlFreeValidCtxt(valid_ctxt)
 
         if ret == -1:

@@ -81,6 +81,10 @@ Bugs fixed
   instead of as the root of a temporary document.  The paths in the error log stay
   relative to the validated element.
 
+* XPath on an ``ElementTree`` of a sub-element, XSLT, RelaxNG, Schematron and DTD
+  validation of elements other than the root element change the tree while they run,
+  but held only the read lock of the document.  They now take the write lock in that case.
+
 Other changes
 -------------
 
